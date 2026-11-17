@@ -107,7 +107,18 @@ function textResponse(text, status = 200, headers = {}) {
   });
 }
 
-function htmlResponse(html, status = 200) {
+function htmlResponse(html, status = 200, formActionOrigin = "") {
+  let formActionSources = "'self'";
+  if (formActionOrigin) {
+    try {
+      const origin = new URL(formActionOrigin);
+      if (origin.protocol === "https:" && !origin.username && !origin.password) {
+        formActionSources += ` ${origin.origin}`;
+      }
+    } catch {
+      // Keep the strict same-origin policy if the supplied origin is invalid.
+    }
+  }
   return new Response(html, {
     status,
     headers: {
@@ -116,7 +127,7 @@ function htmlResponse(html, status = 200) {
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "no-referrer",
       "Content-Security-Policy":
-        "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        `default-src 'none'; style-src 'unsafe-inline'; form-action ${formActionSources}; base-uri 'none'; frame-ancestors 'none'`,
     },
   });
 }
@@ -573,12 +584,14 @@ function authorizationSuccessRedirect(origin, record, code) {
   });
 }
 
-function loginForm(flowId, errorMessage = "") {
+function loginForm(flowId, errorMessage = "", formActionOrigin = "") {
   const error = errorMessage
     ? `<p role="alert">${escapeHtml(errorMessage)}</p>`
     : "";
   return htmlResponse(
     `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Autorizar Trello</title><body><main><h1>Autorizar leitura do Trello</h1><p>Informe a senha de acesso configurada pelo administrador deste Worker. O ChatGPT receberá somente permissão de leitura.</p>${error}<form method="post" action="/authorize"><input type="hidden" name="flow" value="${escapeHtml(flowId)}"><label for="password">Senha de acesso</label><br><input id="password" name="password" type="password" autocomplete="current-password" required minlength="16"><br><button type="submit">Autorizar leitura</button></form></main></body></html>`,
+    200,
+    formActionOrigin,
   );
 }
 
@@ -643,7 +656,7 @@ async function handleAuthorize(request, env, url) {
     const ipHash = await sha256Base64Url(`${issuer}\n${ip}`);
     const created = await createOAuthFlow(env, flowId, code, flow, ipHash, Date.now());
     if (!created) return authErrorPage("Muitas tentativas de conexão. Aguarde alguns minutos e tente novamente.", 429);
-    return loginForm(flowId);
+    return loginForm(flowId, "", issuer);
   }
 
   if (request.method !== "POST") {
@@ -669,7 +682,7 @@ async function handleAuthorize(request, env, url) {
     if (attempts >= MAX_PASSWORD_ATTEMPTS_PER_FLOW) {
       return authErrorPage("O limite de tentativas foi atingido. Volte ao ChatGPT para iniciar uma nova conexão.", 429);
     }
-    return loginForm(flowId, "Senha incorreta. Tente novamente.");
+    return loginForm(flowId, "Senha incorreta. Tente novamente.", issuer);
   }
 
   const approved = await approveOAuthFlow(env, flowId, Date.now());
