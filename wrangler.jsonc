@@ -1,0 +1,38 @@
+{
+  "name": "flat-base-67b6",
+  "main": "./worker.js",
+  "compatibility_date": "2026-11-17",
+  "workers_dev": true,
+  "observability": {
+    "enabled": true
+  },
+  "d1_databases": [
+    {
+      "binding": "AUTH_DB",
+      "database_name": "trello-attachment-mcp-auth",
+      "database_id": "7adb1b2b-65a7-4492-b5e3-3d3f9fa8597c"
+    }
+  ],
+  "secrets_store_secrets": [
+    {
+      "binding": "MCP_LOGIN_PASSWORD",
+      "store_id": "5627b4633c6641da9e689c11575735f9",
+      "secret_name": "MCP_LOGIN_PASSWORD"
+    },
+    {
+      "binding": "MCP_OAUTH_SECRET",
+      "store_id": "5627b4633c6641da9e689c11575735f9",
+      "secret_name": "MCP_OAUTH_SECRET"
+    },
+    {
+      "binding": "TRELLO_KEY",
+      "store_id": "5627b4633c6641da9e689c11575735f9",
+      "secret_name": "TRELLO_KEY"
+    },
+    {
+      "binding": "TRELLO_TOKEN",
+      "store_id": "5627b4633c6641da9e689c11575735f9",
+      "secret_name": "TRELLO_TOKEN"
+    }
+  ]
+}
