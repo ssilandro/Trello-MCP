@@ -7,14 +7,14 @@ O procedimento foi conferido em **16/11/2026**. A tela do Cloudflare e a disponi
 ## O que você vai precisar
 
 - Uma conta Cloudflare com Workers e D1 habilitados.
-- Uma chave e um token de API do Trello com permissão somente de leitura. A Atlassian documenta a geração e o uso de ambos na [documentação de autorização do Trello](https://developer.atlassian.com/cloud/trello/guides/rest-api/authorization/).
+- Uma chave e um token de API do Trello com permissões de leitura e escrita em cartões. A Atlassian documenta a geração e o uso de ambos na [documentação de autorização do Trello](https://developer.atlassian.com/cloud/trello/guides/rest-api/authorization/).
 - Uma conta ChatGPT com acesso a conexões MCP personalizadas. As opções dependem do plano e das permissões administradas pelo workspace; consulte a [documentação de conexão de servidores MCP](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt).
 - Um gerenciador de senhas para criar dois valores secretos fortes.
 
 ## 1. Separe as credenciais do Trello
 
 1. Abra a página de administração de Power-Ups do Trello e gere uma **API Key** para a sua integração.
-2. Gere um **Token** para essa chave e conceda somente a permissão `read`. Não conceda `write` nem `account`.
+2. Gere um **Token** para essa chave com permissões `read` e `write`, necessárias para consultar e alterar membros dos cartões. Não conceda `account`.
 3. Guarde a Key e o Token no seu gerenciador de senhas. O Token dá acesso aos boards permitidos para a conta Trello que o concedeu.
 
 Consulte os passos atuais da Atlassian em [Autorizar com a API REST do Trello](https://developer.atlassian.com/cloud/trello/guides/rest-api/authorization/). Não envie a Key ou o Token em uma conversa do ChatGPT.
@@ -60,7 +60,7 @@ O Worker chama `await env.NOME_DO_BINDING.get()` para ler cada segredo do Store.
 | Nome | Valor |
 |---|---|
 | `TRELLO_KEY` | API Key do Trello |
-| `TRELLO_TOKEN` | Token Trello com escopo somente de leitura |
+| `TRELLO_TOKEN` | Token Trello com permissões de leitura e escrita em cartões |
 | `MCP_LOGIN_PASSWORD` | Senha forte que será pedida quando o ChatGPT conectar. Use pelo menos 16 caracteres. |
 | `MCP_OAUTH_SECRET` | Segredo aleatório com pelo menos 32 bytes. Gere-o no gerenciador de senhas; não reutilize uma senha de outro serviço. |
 
@@ -95,7 +95,7 @@ Use a URL HTTPS pública completa e acrescente `/mcp` no final.
 5. Selecione autenticação **OAuth**. Não use um bearer token fixo nem a Key/Token do Trello como autenticação do MCP.
 6. Se o formulário perguntar o método de registro do cliente, escolha **Client ID Metadata Documents (CIMD)** quando essa opção estiver disponível.
 7. Confirme a conexão.
-8. Na primeira tentativa de usar uma ferramenta, o navegador abrirá a página do Worker. Informe `MCP_LOGIN_PASSWORD` e selecione **Autorizar leitura**.
+8. Na primeira tentativa de usar uma ferramenta, o navegador abrirá a página do Worker. Informe `MCP_LOGIN_PASSWORD` e escolha a autorização solicitada. `trello.read` permite consulta; `trello.read trello.write` também permite adicionar e remover membros de cartões.
 
 O Worker publica metadados OAuth, valida o endereço de retorno contra os metadados HTTPS do cliente ChatGPT, exige autorização por código com PKCE `S256` e emite tokens com validade de uma hora vinculados à URL daquele Worker. O fluxo segue a orientação atual da [documentação OAuth do OpenAI para servidores MCP](https://developers.openai.com/plugins/build/auth). O OpenAI também documenta a URL `/mcp` e a configuração OAuth em [Adicionar um servidor MCP personalizado](https://developers.openai.com/plugins/build/app-quickstart).
 
@@ -110,18 +110,22 @@ Depois de conectar o servidor, tente:
 - “Quais anexos existem nesse card?”
 - “Abra a imagem anexada e descreva o que aparece nela.”
 - “Extraia as datas e os valores deste CSV.”
+- “Quais membros estão atribuídos a este card?”
+- “Adicione Flaviana e Lissandro ao card Fechamento de caixa.”
+- “Remova Flaviana do cartão.”
 
 `ler_anexo` baixa o arquivo pela API autenticada do Trello. JPEG e PNG são conferidos pelos bytes iniciais e retornados como conteúdo visual MCP. TXT, CSV e JSON válidos em UTF-8 são retornados como texto. PDFs, DOCX e XLSX são identificados e recebem um erro explícito porque este Worker de um único arquivo não inclui uma biblioteca de extração.
 
 ## Segurança, limites e manutenção
 
-- Todas as ferramentas Trello são somente leitura. O Worker usa o cabeçalho oficial de autorização da API do Trello; Key e Token não são acrescentados à URL nem enviados ao ChatGPT.
+- A conexão OAuth distingue leitura (`trello.read`) e escrita (`trello.write`). A escrita só está disponível para uma autorização que inclua `trello.write`; o Worker usa os endpoints de membros de cartão e consulta novamente o cartão depois da alteração.
+- O Worker usa o cabeçalho oficial de autorização da API do Trello; Key e Token não são acrescentados à URL nem enviados ao ChatGPT.
 - O conteúdo de anexos e descrições de cards é tratado como dado não confiável. O Worker nunca fabrica conteúdo que não baixou.
 - O download usa IDs do card e do anexo, valida o tamanho antes e durante a leitura e permite redirecionamentos somente para hosts de download do Trello. A credencial não é encaminhada para o bucket S3.
 - A configuração padrão aceita arquivos de até 1 MiB; o limite rígido é 2 MiB. Não há armazenamento de anexos em memória persistente, D1 ou R2.
 - D1 é necessário para códigos OAuth de uso único; sem persistência, o código poderia ser reutilizado. No plano Free, as cotas atuais do D1 são 5 milhões de linhas lidas/dia, 100 mil escritas/dia e 5 GB de armazenamento; exceder limites diários interrompe as consultas até a renovação. Workers Free têm 100 mil requisições/dia, 10 ms de CPU por requisição e 128 MB de memória. Veja os [limites do Workers](https://developers.cloudflare.com/workers/platform/limits/) e o [preço e cotas do D1](https://developers.cloudflare.com/d1/platform/pricing/).
-- O login OAuth usa uma senha compartilhada por instalação, sem contas individuais ou trilha de auditoria por usuário. Mantenha a senha apenas com as pessoas autorizadas a ler a conta Trello configurada.
-- Se o Token Trello for revogado, gere outro com escopo `read` e substitua o Secret `TRELLO_TOKEN` no painel.
+- O login OAuth usa uma senha compartilhada por instalação, sem contas individuais ou trilha de auditoria por usuário. Mantenha a senha apenas com as pessoas autorizadas a consultar e alterar membros na conta Trello configurada.
+- Se o Token Trello for revogado, gere outro com permissões `read` e `write` para cartões e substitua o Secret `TRELLO_TOKEN` no painel.
 - Se trocar a URL ou recriar o Worker, atualize a conexão MCP no ChatGPT para a nova URL.
 
 ## Limitações conhecidas
@@ -129,3 +133,4 @@ Depois de conectar o servidor, tente:
 - O ChatGPT conecta a servidores MCP remotos; `workers.dev` fornece uma URL pública HTTPS. A conta ChatGPT precisa permitir conexões MCP personalizadas.
 - Este pacote não foi conectado a uma conta Cloudflare/Trello real durante sua validação. Veja [TESTES.md](TESTES.md) para separar testes automatizados com mocks de validação de integração.
 - PDF, DOCX e XLSX não têm extração implementada. O Worker informa essa limitação ao invés de retornar texto inventado.
+

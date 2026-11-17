@@ -208,8 +208,11 @@ async function authorize(env, { password = PASSWORD, resource = BASE, scope = "t
     headers: { Origin: BASE, "Content-Type": "application/x-www-form-urlencoded" },
     body: form.toString(),
   }), env);
-  if (approval.status !== 302) return { loginPage, approval };
-  const redirect = new URL(approval.headers.get("Location"));
+  if (approval.status !== 200) return { loginPage, approval };
+  const approvalHtml = await approval.clone().text();
+  const redirectHref = /href="(https:\/\/chatgpt\.com\/connector_platform_oauth_redirect[^"]+)"/.exec(approvalHtml)?.[1];
+  if (!redirectHref) return { loginPage, approval };
+  const redirect = new URL(redirectHref.replace(/&amp;/g, "&"));
   const tokenResponse = await worker.fetch(new Request(`${BASE}/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -260,7 +263,11 @@ function setupFetch() {
   trelloCalls = [];
   fixture = {
     boards: [{ id: "board-1", name: "SB Odonto Clinic", closed: false, url: "https://trello.com/b/board-1" }],
-    cards: [{ id: "card-1", name: "Fechamento de caixa", desc: "Fechamento de novembro", idBoard: "board-1", url: "https://trello.com/c/card-1" }],
+    cards: [{ id: "card-1", name: "Fechamento de caixa", desc: "Fechamento de novembro", idBoard: "board-1", idMembers: [], url: "https://trello.com/c/card-1" }],
+    members: [
+      { id: "member-1", fullName: "Flaviana Silva", username: "flaviana" },
+      { id: "member-2", fullName: "Lissandro Lima", username: "lissandro" },
+    ],
     attachments: new Map(),
     downloads: new Map(),
     s3Download: null,
@@ -290,6 +297,30 @@ function setupFetch() {
 
     if (url.pathname === "/1/members/me/boards") return asResponse(fixture.boards);
     if (url.pathname === "/1/search") return asResponse({ cards: fixture.cards });
+    if (url.pathname === "/1/boards/board-1") return asResponse({ id: "board-1", name: "SB Odonto Clinic" });
+    if (url.pathname === "/1/boards/board-1/members") return asResponse(fixture.members);
+    const memberMatch = /^\/1\/members\/([^/]+)$/.exec(url.pathname);
+    if (memberMatch) {
+      const member = fixture.members.find((item) => item.id === decodeURIComponent(memberMatch[1]));
+      return member ? asResponse(member) : asResponse({ message: "not found" }, 404);
+    }
+    if (url.pathname === "/1/cards/card-1" && (init.method || "GET") === "GET") return asResponse(fixture.cards[0]);
+    if (url.pathname === "/1/cards/card-1/members") {
+      return asResponse(fixture.members.filter((member) => fixture.cards[0].idMembers.includes(member.id)));
+    }
+    if (url.pathname === "/1/cards/card-1/idMembers" && init.method === "POST") {
+      const memberId = new URLSearchParams(init.body).get("value");
+      if (!fixture.members.some((member) => member.id === memberId)) return asResponse({ message: "invalid member" }, 400);
+      if (!fixture.cards[0].idMembers.includes(memberId)) fixture.cards[0].idMembers.push(memberId);
+      return asResponse({ id: "card-1", idMembers: fixture.cards[0].idMembers });
+    }
+    const removeMemberMatch = /^\/1\/cards\/card-1\/idMembers\/([^/]+)$/.exec(url.pathname);
+    if (removeMemberMatch && init.method === "DELETE") {
+      const memberId = decodeURIComponent(removeMemberMatch[1]);
+      if (!fixture.members.some((member) => member.id === memberId)) return asResponse({ message: "invalid member" }, 404);
+      fixture.cards[0].idMembers = fixture.cards[0].idMembers.filter((id) => id !== memberId);
+      return asResponse({ id: "card-1", idMembers: fixture.cards[0].idMembers });
+    }
     const listMatch = /^\/1\/cards\/([^/]+)\/attachments$/.exec(url.pathname);
     if (listMatch) {
       const cardId = decodeURIComponent(listMatch[1]);
@@ -339,13 +370,110 @@ test("expõe metadados de recurso e inicializa MCP com a versão negociada", asy
   assert.equal(body.result.serverInfo.name, "trello-attachment-mcp");
 });
 
-test("lista quatro ferramentas OAuth sem expor dados do Trello", async () => {
+test("lista as seis ferramentas OAuth sem expor dados do Trello", async () => {
   const response = await postMcp(makeEnv(), jsonRpc("tools/list"));
   assert.equal(response.status, 200);
   const { result } = await response.json();
-  assert.deepEqual(result.tools.map((tool) => tool.name), ["listar_boards", "buscar_cards", "listar_anexos", "ler_anexo"]);
+  assert.deepEqual(result.tools.map((tool) => tool.name), ["listar_boards", "buscar_cards", "listar_anexos", "ler_anexo", "trelloReadMember", "trelloWriteCard"]);
   assert.ok(result.tools.every((tool) => tool._meta.securitySchemes[0].type === "oauth2"));
+  assert.deepEqual(result.tools.find((tool) => tool.name === "trelloReadMember")._meta.securitySchemes[0].scopes, ["trello.read"]);
+  assert.deepEqual(result.tools.find((tool) => tool.name === "trelloWriteCard")._meta.securitySchemes[0].scopes, ["trello.read", "trello.write"]);
   assert.equal(trelloCalls.length, 0);
+});
+
+test("valida schema e escopos das ferramentas de membros", async () => {
+  const env = makeEnv();
+  const { tokenBody } = await authorize(env, { scope: "trello.read trello.write" });
+  const write = await postMcp(env, jsonRpc("tools/call", {
+    name: "trelloWriteCard",
+    arguments: { action: "add_member", cardId: "card-1", memberId: "member-1" },
+  }), tokenBody.access_token);
+  const writeResult = (await write.json()).result;
+  assert.equal(writeResult.isError, undefined, JSON.stringify(writeResult));
+  assert.equal(fixture.cards[0].idMembers.includes("member-1"), true);
+
+  const readOnly = await authorize(makeEnv());
+  const denied = await postMcp(makeEnv(), jsonRpc("tools/call", {
+    name: "trelloWriteCard",
+    arguments: { action: "remove_member", cardId: "card-1", memberId: "member-1" },
+  }), readOnly.tokenBody.access_token);
+  assert.match((await denied.json()).result.content[0].text, /trello\.write/);
+});
+
+test("adiciona um ou vários membros e confirma o estado real do cartão", async () => {
+  const env = makeEnv();
+  const { tokenBody } = await authorize(env, { scope: "trello.read trello.write" });
+  const response = await postMcp(env, jsonRpc("tools/call", {
+    name: "trelloWriteCard",
+    arguments: { action: "add_member", cardId: "card-1", memberIds: ["member-1", "member-2"] },
+  }), tokenBody.access_token);
+  const result = (await response.json()).result;
+  assert.equal(result.isError, undefined, JSON.stringify(result));
+  assert.equal(result.structuredContent.confirmed, true);
+  assert.deepEqual(result.structuredContent.members.map((member) => member.id), ["member-1", "member-2"]);
+  assert.equal(trelloCalls.filter((call) => new URL(call.url).pathname === "/1/cards/card-1/idMembers").length, 2);
+  assert.ok(trelloCalls.filter((call) => new URL(call.url).pathname === "/1/cards/card-1/idMembers").every((call) => call.init.method === "POST"));
+});
+
+test("remove membro individualmente e consulta os membros atribuídos", async () => {
+  const env = makeEnv();
+  fixture.cards[0].idMembers = ["member-1", "member-2"];
+  const { tokenBody } = await authorize(env, { scope: "trello.read trello.write" });
+  const removed = await postMcp(env, jsonRpc("tools/call", {
+    name: "trelloWriteCard",
+    arguments: { action: "remove_member", cardId: "card-1", memberId: "member-1" },
+  }), tokenBody.access_token);
+  const removedResult = (await removed.json()).result;
+  assert.equal(removedResult.isError, undefined);
+  assert.equal(removedResult.structuredContent.confirmed, true);
+  assert.deepEqual(fixture.cards[0].idMembers, ["member-2"]);
+  assert.equal(trelloCalls.some((call) => new URL(call.url).pathname === "/1/cards/card-1/idMembers/member-1" && call.init.method === "DELETE"), true);
+
+  const read = await postMcp(env, jsonRpc("tools/call", {
+    name: "trelloReadMember",
+    arguments: { action: "list_by_card", cardId: "card-1" },
+  }), tokenBody.access_token);
+  const readResult = (await read.json()).result;
+  assert.equal(readResult.isError, undefined);
+  assert.deepEqual(readResult.structuredContent.members.map((member) => member.id), ["member-2"]);
+  assert.equal(readResult.structuredContent.members[0].username, "lissandro");
+});
+
+test("membro e cartão inválidos retornam erro sem declarar sucesso", async () => {
+  const env = makeEnv();
+  const { tokenBody } = await authorize(env, { scope: "trello.read trello.write" });
+  const invalidMember = await postMcp(env, jsonRpc("tools/call", {
+    name: "trelloWriteCard",
+    arguments: { action: "add_member", cardId: "card-1", memberId: "member-invalido" },
+  }), tokenBody.access_token);
+  const memberResult = (await invalidMember.json()).result;
+  assert.equal(memberResult.isError, true);
+  assert.match(memberResult.content[0].text, /não foi encontrado/);
+  assert.equal(fixture.cards[0].idMembers.length, 0);
+
+  fixture.failures.set("/1/cards/card-invalido", 404);
+  const invalidCard = await postMcp(env, jsonRpc("tools/call", {
+    name: "trelloWriteCard",
+    arguments: { action: "remove_member", cardId: "card-invalido", memberId: "member-1" },
+  }), tokenBody.access_token);
+  const cardResult = (await invalidCard.json()).result;
+  assert.equal(cardResult.isError, true);
+  assert.match(cardResult.content[0].text, /cartão, membro/);
+  assert.equal(trelloCalls.some((call) => new URL(call.url).pathname === "/1/cards/card-invalido/idMembers/member-1"), false);
+});
+
+test("falha de escrita na API não retorna sucesso", async () => {
+  const env = makeEnv();
+  const { tokenBody } = await authorize(env, { scope: "trello.read trello.write" });
+  fixture.failures.set("/1/cards/card-1/idMembers", 500);
+  const response = await postMcp(env, jsonRpc("tools/call", {
+    name: "trelloWriteCard",
+    arguments: { action: "add_member", cardId: "card-1", memberId: "member-1" },
+  }), tokenBody.access_token);
+  const result = (await response.json()).result;
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /HTTP 500/);
+  assert.equal(fixture.cards[0].idMembers.includes("member-1"), false);
 });
 
 test("OAuth rejeita acesso sem token, com token inválido e com Origin não permitido", async () => {
@@ -369,7 +497,7 @@ test("implementa authorization code OAuth com PKCE S256, state, resource e uso �
   const env = makeEnv();
   const result = await authorize(env);
   assert.equal(result.loginPage.status, 200);
-  assert.equal(result.approval.status, 302);
+  assert.equal(result.approval.status, 200);
   assert.equal(result.redirect.searchParams.get("state"), "state_for_test_0123456789");
   assert.equal(result.redirect.searchParams.get("iss"), BASE);
   assert.equal(result.tokenResponse.status, 200);
@@ -670,3 +798,4 @@ test("Streamable HTTP valida versão, Accept e métodos", async () => {
   assert.equal(get.status, 405);
   assert.equal(get.headers.get("Allow"), "POST");
 });
+

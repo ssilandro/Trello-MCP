@@ -1,6 +1,6 @@
-﻿# Trello Attachment MCP
+# Trello Attachment MCP
 
-Worker MCP privado para consultar quadros, buscar cards e ler anexos do Trello. Este projeto fica separado do Nexus e mantém o Worker em um único arquivo, pronto para o editor do Cloudflare.
+Worker MCP privado para consultar quadros, buscar cards, ler anexos e gerenciar membros em cartões do Trello. Este projeto fica separado do Nexus e mantém o Worker em um único arquivo, pronto para o editor do Cloudflare.
 
 ## Conteúdo
 
@@ -11,7 +11,7 @@ Worker MCP privado para consultar quadros, buscar cards e ler anexos do Trello. 
 
 ## Ferramentas
 
-`listar_boards`, `buscar_cards`, `listar_anexos` e `ler_anexo`. O Worker lê JPEG/PNG e arquivos TXT/CSV/JSON. A extração de PDF, DOCX e XLSX não está implementada.
+`listar_boards`, `buscar_cards`, `listar_anexos`, `ler_anexo`, `trelloReadMember` e `trelloWriteCard`. A leitura de membros consulta integrantes do quadro ou atribuídos a um cartão. A escrita adiciona um ou vários membros, remove um membro por chamada e consulta o cartão após a mudança para confirmar o estado. A escrita exige o escopo OAuth `trello.write`; a leitura de membros e as ferramentas existentes usam `trello.read`. O Worker lê JPEG/PNG e arquivos TXT/CSV/JSON. A extração de PDF, DOCX e XLSX não está implementada.
 
 ## Deploy no Cloudflare
 
@@ -24,3 +24,4 @@ Requer Node.js 20 ou superior; não há dependências npm externas.
 ```powershell
 npm test
 ```
+
