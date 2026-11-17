@@ -309,7 +309,7 @@ function setupFetch() {
       return asResponse(fixture.members.filter((member) => fixture.cards[0].idMembers.includes(member.id)));
     }
     if (url.pathname === "/1/cards/card-1/idMembers" && init.method === "POST") {
-      const memberId = new URLSearchParams(init.body).get("value");
+      const memberId = url.searchParams.get("value");
       if (!fixture.members.some((member) => member.id === memberId)) return asResponse({ message: "invalid member" }, 400);
       if (!fixture.cards[0].idMembers.includes(memberId)) fixture.cards[0].idMembers.push(memberId);
       return asResponse({ id: "card-1", idMembers: fixture.cards[0].idMembers });
@@ -412,7 +412,7 @@ test("adiciona um ou vários membros e confirma o estado real do cartão", async
   assert.equal(result.structuredContent.confirmed, true);
   assert.deepEqual(result.structuredContent.members.map((member) => member.id), ["member-1", "member-2"]);
   assert.equal(trelloCalls.filter((call) => new URL(call.url).pathname === "/1/cards/card-1/idMembers").length, 2);
-  assert.ok(trelloCalls.filter((call) => new URL(call.url).pathname === "/1/cards/card-1/idMembers").every((call) => call.init.method === "POST"));
+  assert.ok(trelloCalls.filter((call) => new URL(call.url).pathname === "/1/cards/card-1/idMembers").every((call) => call.init.method === "POST" && new URL(call.url).searchParams.has("value")));
 });
 
 test("remove membro individualmente e consulta os membros atribuídos", async () => {

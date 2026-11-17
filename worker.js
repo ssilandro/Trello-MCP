@@ -927,11 +927,7 @@ async function trelloWriteCard(args, env) {
     try {
       if (args.action === "add_member") {
         const body = new URLSearchParams({ value: memberId });
-        await trelloFetch(`cards/${cardId}/idMembers`, env, {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: body.toString(),
-        });
+        await trelloFetch(`cards/${cardId}/idMembers?${body.toString()}`, env, { method: "POST" });
       } else {
         await trelloFetch(`cards/${cardId}/idMembers/${encodedMemberId}`, env, { method: "DELETE" });
       }
