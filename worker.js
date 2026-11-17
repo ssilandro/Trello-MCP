@@ -9,6 +9,7 @@ const SUPPORTED_PROTOCOL_VERSIONS = new Set([
 const REQUIRED_SCOPE = "trello.read";
 const ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
 const AUTH_CODE_TTL_SECONDS = 2 * 60;
+const AUTH_FLOW_TTL_SECONDS = 10 * 60;
 const RATE_LIMIT_WINDOW_SECONDS = 15 * 60;
 const MAX_LOGIN_ATTEMPTS_PER_IP = 20;
 const MAX_LOGIN_ATTEMPTS_GLOBAL = 1000;
@@ -579,7 +580,7 @@ function authorizationSuccessRedirect(origin, record, code) {
   target.searchParams.set("state", record.state);
   target.searchParams.set("iss", origin);
   return new Response(null, {
-    status: 302,
+    status: 303,
     headers: { Location: target.href, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" },
   });
 }
@@ -589,7 +590,7 @@ function loginForm(flowId, errorMessage = "", formActionOrigin = "") {
     ? `<p role="alert">${escapeHtml(errorMessage)}</p>`
     : "";
   return htmlResponse(
-    `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Autorizar Trello</title><body><main><h1>Autorizar leitura do Trello</h1><p>Informe a senha de acesso configurada pelo administrador deste Worker. O ChatGPT receberá somente permissão de leitura.</p>${error}<form method="post" action="/authorize"><input type="hidden" name="flow" value="${escapeHtml(flowId)}"><label for="password">Senha de acesso</label><br><input id="password" name="password" type="password" autocomplete="current-password" required minlength="16"><br><button type="submit">Autorizar leitura</button></form></main></body></html>`,
+    `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Autorizar Trello</title><body><main><h1>Autorizar leitura do Trello</h1><p>Informe a senha de acesso configurada pelo administrador deste Worker. O ChatGPT receberá somente permissão de leitura.</p>${error}<form method="post" action="/authorize" target="_top"><input type="hidden" name="flow" value="${escapeHtml(flowId)}"><label for="password">Senha de acesso</label><br><input id="password" name="password" type="password" autocomplete="current-password" required minlength="16"><br><button type="submit">Autorizar leitura</button></form></main></body></html>`,
     200,
     formActionOrigin,
   );
@@ -650,7 +651,7 @@ async function handleAuthorize(request, env, url) {
       resource: issuer,
       state,
       codeChallenge: params.get("code_challenge"),
-      expiresAt: Date.now() + AUTH_CODE_TTL_SECONDS * 1000,
+      expiresAt: Date.now() + AUTH_FLOW_TTL_SECONDS * 1000,
     };
     const ip = request.headers.get("CF-Connecting-IP") || "unknown";
     const ipHash = await sha256Base64Url(`${issuer}\n${ip}`);
