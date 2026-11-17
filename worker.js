@@ -579,10 +579,9 @@ function authorizationSuccessRedirect(origin, record, code) {
   target.searchParams.set("code", code);
   target.searchParams.set("state", record.state);
   target.searchParams.set("iss", origin);
-  return new Response(null, {
-    status: 303,
-    headers: { Location: target.href, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" },
-  });
+  return htmlResponse(
+    `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Autorização concluída</title><body><main><h1>Autorização concluída</h1><p>A senha foi aceita. Clique abaixo para voltar ao ChatGPT e concluir a conexão.</p><p><a href="${escapeHtml(target.href)}" target="_top" rel="noreferrer">Continuar no ChatGPT</a></p></main></body></html>`,
+  );
 }
 
 function loginForm(flowId, errorMessage = "", formActionOrigin = "") {
