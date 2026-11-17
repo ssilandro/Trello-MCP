@@ -10,7 +10,7 @@
     {
       "binding": "AUTH_DB",
       "database_name": "trello-attachment-mcp-auth",
-      "database_id": "7adb1b2b-65a7-4492-b5e3-3d3f9fa8597c"
+      "database_id": "7adb1b28-65a7-4492-b5e3-3d3f9fa8597c"
     }
   ],
   "secrets_store_secrets": [
@@ -36,3 +36,4 @@
     }
   ]
 }
+
